@@ -1,6 +1,8 @@
 
 
 from collections import defaultdict
+import difflib
+from heapq import merge
 import re
 from typing import Any
 
@@ -20,7 +22,7 @@ class BibFile:
         with open(self.fname, 'r') as f:
             content = f.read()
 
-        for entry in re.split(r'\@(?=\w+\{)', content):
+        for entry in re.split(r'\@(?=\w+\s*\{)', content):
             if not entry.strip():
                 continue
             self.parse_entry(entry)
@@ -63,7 +65,8 @@ class BibFile:
                     while new_key + str(index) in new_bib.bib_entries:
                         index += 1
                     new_key += str(index)
-                    print(text + 'The entries seem to be different. Adding both with keys {} and {}'.format(key, new_key))
+                    print(
+                        text + 'The entries seem to be different. Adding both with keys {} and {}'.format(key, new_key))
                     new_bib.bib_entries[new_key] = value
             else:
                 new_bib.bib_entries[key] = value
@@ -87,21 +90,27 @@ class BibFile:
             else:
                 unique_entries.append(value)
         return duplicated_entries
-    
+
     def merge_duplicated_entries(self):
         """
         Merge the duplicated entries in the bib file
+
+        Returns
+        -------
+        merged_keys: dict[str, str]
+            The keys of the entries that have been merged and the key of the
+            entry that has been merged into.
         """
         duplicated_entries = self.find_duplicated_entries()
-        merged_keys = defaultdict(list)
+        merged_keys = {}
         for key1 in duplicated_entries:
             entry1 = self.bib_entries[key1]
             key2, entry2 = self.get_key_entry(entry1, key1)
             new_entry = entry1.merge(entry2)
             if key1 != new_entry.id_key:
-                merged_keys[new_entry.id_key].append(key1)
+                merged_keys[key1] = new_entry.id_key
             if key2 != new_entry.id_key:
-                merged_keys[new_entry.id_key].append(key2)
+                merged_keys[key2] = new_entry.id_key
 
             _ = self.bib_entries.pop(key1)
             _ = self.bib_entries.pop(key2)
@@ -113,7 +122,7 @@ class BibFile:
             if entry == value and key != key2:
                 return key2, value
         raise ValueError('Entry not found in bib file')
-    
+
     def write(self, fout: str):
         with open(fout, 'w') as f:
             f.write(str(self))
@@ -128,7 +137,7 @@ class BibEntry:
             self.parse_entry(fields)
 
     def parse_entry(self, fields: str):
-        for entry_key, info in re.findall('\s*(\w+)\s*=\s*\{(.*)\}', fields):
+        for entry_key, info in re.findall('\s*(\w+)\s*=\s*[\{"](.*)[\}"]', fields):
             self.fields[entry_key.lower()] = info.strip()
 
     def __repr__(self):
@@ -153,21 +162,58 @@ class BibEntry:
         """
         Merge two bib entries. If the entries are the same, the self one is kept.
         """
-        id_key = self.id_key if len(self.id_key) < len(other.id_key) else other.id_key
+        id_key = self.id_key if len(self.id_key) < len(
+            other.id_key) else other.id_key
         new_entry = BibEntry(self.type, id_key)
         new_entry.fields = {**other.fields, **self.fields}
         return new_entry
 
 
+class LatexFile:
+    def __init__(self, fname: str):
+        self.fname = fname
+        with open(fname, 'r') as f:
+            self.original_content = f.read()
+        self.modified_content = self.original_content
+
+    def __str__(self) -> str:
+        return self.modified_content
+
+    def __repr__(self) -> str:
+        return 'LatexFile {}'.format(self.fname)
+
+    def write(self, fout: str):
+        with open(fout, 'w') as f:
+            f.write(str(self))
+
+    def replace_cite_entries(self, merged_dict: dict[str, str]):
+        for old, new in merged_dict.items():
+            self.modified_content = re.sub(r'(\\(cite|citenum)\{[\S\s]*?)'+old,
+                                           lambda m: m.group(1) + new, self.modified_content)
+
+    def diff(self):
+        diff_lines = difflib.unified_diff(
+            self.original_content.split('\n'),
+            self.modified_content.split('\n')
+        )
+        for line in diff_lines:
+            print(line)
+
+
 if __name__ == '__main__':
     from glob import glob
 
-    bibfiles = [BibFile(fname) for fname in glob('./example_files/*bib')]
-    total_bib = sum(bibfiles)
-    titles = [i.fields['title']
-              for i in total_bib.bib_entries.values() if 'title' in i.fields]
+    bibfiles = [BibFile(fname) for fname in glob('./example_files/bib/*bib')]
+    total_bib = sum(bibfiles, BibFile())
 
     total_bib.write('not_merged.bib')
-    print(total_bib.find_duplicated_entries())
-    print(total_bib.merge_duplicated_entries())
+    merged_entries = total_bib.merge_duplicated_entries()
     total_bib.write('merged.bib')
+    
+    print(merged_entries)
+    for fname in glob('./example_files/tex/*tex'):
+        latex_file = LatexFile(fname)
+        latex_file.replace_cite_entries(merged_entries)
+        latex_file.diff()
+        fout = fname.replace('/tex/', '/out_tex/')
+        latex_file.write(fout)
