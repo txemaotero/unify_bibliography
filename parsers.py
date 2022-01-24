@@ -1,44 +1,35 @@
-from collections import defaultdict
 import difflib
-from glob import glob
-from heapq import merge
 import os
 import re
 from typing import Any
 
 
 class BibFile:
+    """
+    Class to manage the bibliography entries in a .bib file
+    
+    Parameters
+    ----------
+    fname : str
+        The name of the bib file
+
+    Attributes
+    ----------
+    bib_entries : dict[str, BibEntry]
+        The bibliography entries in the bib file
+    non_entry_lines : list[str]
+        The lines that are not bib entries (usually header lines)
+
+    """
     def __init__(self, fname: str = None):
         self.bib_entries: dict[str, BibEntry] = {}
         self.non_entry_lines: list[str] = []
         self.fname = fname
         if self.fname is not None:
             self.parse_bib()
-
-    def parse_bib(self):
-        """
-        Extract the bibliography entries from a bibtex file
-        """
-        with open(self.fname, "r") as f:
-            content = f.read()
-
-        for entry in re.split(r"\@(?=\w+\s*\{)", content):
-            if not entry.strip():
-                continue
-            self.parse_entry(entry)
-
-    def parse_entry(self, entry: str):
-        match = re.match(r"(\w+)\s*\{([\S\s]+)\}", entry)
-        if match is None:
-            raise ValueError("Invalid bibtex entry: {}".format(entry))
-
-        entry_type, content = match.groups()
-        if entry_type.lower() in ("control",):
-            self.non_entry_lines.append("@" + entry)
-            return
-        key, fields = content.split("\n", 1)
-        key = key.strip().replace(",", "")
-        self.bib_entries[key] = BibEntry(entry_type, key, fields)
+            
+    def __getitem__(self, key: str) -> "BibEntry":
+        return self.bib_entries[key]
 
     def __repr__(self):
         return "Bib file: {}".format(self.fname)
@@ -85,9 +76,38 @@ class BibFile:
         else:
             raise ValueError("Cannot add bib files to {}".format(repr(other)))
 
+    def parse_bib(self):
+        """
+        Extract the bibliography entries from a bibtex file
+        """
+        with open(self.fname, "r") as f:
+            content = f.read()
+
+        for entry in re.split(r"\@(?=\w+\s*\{)", content):
+            if not entry.strip():
+                continue
+            self.parse_entry(entry)
+
+    def parse_entry(self, entry: str):
+        """
+        Initialize a bib entry from its corresponding string in the bib file.
+        """
+        match = re.match(r"(\w+)\s*\{([\S\s]+)\}", entry)
+        if match is None:
+            raise ValueError("Invalid bibtex entry: {}".format(entry))
+
+        entry_type, content = match.groups()
+        if entry_type.lower() in ("control",):
+            self.non_entry_lines.append("@" + entry)
+            return
+        key, fields = content.split("\n", 1)
+        key = key.strip().replace(",", "")
+        self.bib_entries[key] = BibEntry(entry_type, key, fields)
+
+
     def find_duplicated_entries(self) -> list[str]:
         """
-        Find the duplicated entries in the bib file
+        Find duplicated entries in the bib file checking the title, doi and issbn.
         """
         duplicated_entries = []
         unique_entries = []
@@ -106,7 +126,8 @@ class BibFile:
         -------
         merged_keys: dict[str, str]
             The keys of the entries that have been merged and the key of the
-            entry that has been merged into.
+            entry that has been merged into. Useful to adapt the latex file
+            with the replace_cite_entries method.
         """
         duplicated_entries = self.find_duplicated_entries()
         merged_keys = {}
@@ -125,6 +146,10 @@ class BibFile:
         return dict(merged_keys)
 
     def get_key_entry(self, entry: "BibEntry", key: str) -> tuple[str, "BibEntry"]:
+        """
+        Get the key and the entry of the bib items that is equal but not the
+        same as the given.
+        """
         for key2, value in self.bib_entries.items():
             if entry == value and key != key2:
                 return key2, value
@@ -139,6 +164,32 @@ class BibFile:
 
 
 class BibEntry:
+    """
+    Class to represent a bibtex entry.
+    
+    Note: two BibEntry objects are equal if they have the same id_key, title,
+    doi or issbn.
+    
+    Parameters
+    ----------
+    type : str
+        The type of the entry (article, book, ...)
+    id_key : str
+        The bib key of the entry
+    fields : str
+        The text of the bib file with the information of the entry (authors,
+        year, ...)
+    
+    Attributes
+    ----------
+    type : str
+        The type of the entry (article, book, ...)
+    id_key : str
+        The bib key of the entry
+    fields : dict[str, str]
+        A dictionary with the fields of the entry.
+    
+    """
     def __init__(self, type: str, id_key: str, fields: str = None):
         self.type = type
         self.id_key = id_key
@@ -146,12 +197,8 @@ class BibEntry:
         if fields is not None:
             self.parse_entry(fields)
 
-    def parse_entry(self, fields: str):
-        for entry_key, info in re.findall('\s*(\w+)\s*=\s*[\{"](.*)[\}"]', fields):
-            self.fields[entry_key.lower()] = info.strip()
-
     def __repr__(self):
-        return "{} bibentry of {}".format(self.type, self.fields)
+        return "{} bibentry of {}".format(self.type, self.id_key)
 
     def __str__(self):
         final_str = f"@{self.type}{{{self.id_key},\n"
@@ -168,9 +215,17 @@ class BibEntry:
                     cond = cond or (self.fields[field] == other.fields[field])
         return cond
 
+    def parse_entry(self, fields: str):
+        """
+        Parse the text containing the fields of the entry.
+        """
+        for entry_key, info in re.findall('\s*(\w+)\s*=\s*[\{"](.*)[\}"]', fields):
+            self.fields[entry_key.lower()] = info.strip()
+
     def merge(self, other: "BibEntry") -> "BibEntry":
         """
-        Merge two bib entries. If the entries are the same, the self one is kept.
+        Merge two bib entries. If the entries are the same, the self one is
+        retained.
         """
         id_key = self.id_key if len(self.id_key) < len(other.id_key) else other.id_key
         new_entry = BibEntry(self.type, id_key)
@@ -179,6 +234,36 @@ class BibEntry:
 
 
 class LatexFile:
+    """
+    Class to modify a latex file.
+    
+    Parameters
+    ----------
+    fname : str
+        The path to the latex file to modify.
+
+    Attributes
+    ----------
+    fname : str
+        The path to the latex file to modify.
+    file_dir : str
+        The full path of the directory containing the latex file.
+    file_label : str
+        The label of the latex file. This is taken from the name of the last
+        subdir containing the file.
+    original_content : str
+        The original content of the latex file. This remains always the same.
+    modified_content : str
+        The resulting content of the latex file after applying the
+        modifications.
+    title : str
+        The title defined in the latex file.
+    packages : dict[str, str]
+        The packages included in the latex file. The keys are the package names
+        and the values are the lines used to include the package (with the
+        additional options).
+    
+    """
     def __init__(self, fname: str):
         self.fname = fname
         self.file_dir = os.path.dirname(fname)
@@ -187,6 +272,7 @@ class LatexFile:
             self.original_content = f.read()
         self.modified_content = self.original_content
         self.title = self.get_title()
+        self.packages = self.get_packages()
 
     def __str__(self) -> str:
         return self.modified_content
@@ -216,10 +302,29 @@ class LatexFile:
 
     def _path_to_replace(self, match: re.Match):
         """
-        Devuelve el path a reemplazar
+        Returns the path to substitute from a re.Match
         """
         path = os.path.normpath(os.path.join(f"{self.file_dir}", match.group(2)))
         return r'\{0}{{"{1}"}}'.format(match.group(1), path)
+
+    def get_title(self) -> str:
+        """
+        Returns the title defined in the latex file.
+        """
+        match = re.search(r"\\title\s*\{([\S\s]*?)\}", self.modified_content)
+        if match:
+            return match.group(1).strip()
+        else:
+            return ""
+
+    def get_packages(self) -> dict[str, str]:
+        """
+        Parses the included packages in the latex file.
+        """
+        packages = {}
+        for match in re.finditer(r"\\usepackage\s*\[[\S\s]*?\]\s*\{([\S\s]*?)\}", self.modified_content):
+            packages[match.group(1)] = match.group(0)
+        return packages
 
     def write(self, fout: str = None):
         """
@@ -241,22 +346,18 @@ class LatexFile:
             )
 
     def diff(self):
+        """
+        Prints the diff between the original and modified content.
+        """
         diff_lines = difflib.unified_diff(
             self.original_content.split("\n"), self.modified_content.split("\n")
         )
         for line in diff_lines:
             print(line)
 
-    def get_title(self) -> str:
-        match = re.search(r"\\title\s*\{([\S\s]*?)\}", self.modified_content)
-        if match:
-            return match.group(1).strip()
-        else:
-            return ""
-
     def fix_partial_paths(self):
         """
-        Arregla las rutas parciales de los inputs
+        Fix partial paths defined in the latex file.
         """
         with_file_commands = (
             "includegraphics",
@@ -274,7 +375,8 @@ class LatexFile:
 
     def fix_labels_refs(self):
         """
-        Arregla los labels y los refs
+        Changes the labels and references to add the file label and avoid
+        duplicates.
         """
         self.modified_content = re.sub(
             r"\\(label.*?|ref.*?)\{(.*?)\}",
@@ -284,7 +386,7 @@ class LatexFile:
 
     def substitute_inputs(self):
         """
-        Substitute the inputs in the fixed_content.
+        Substitutes the inputs in the latex file with their content.
         """
         while r"\input{" in self.modified_content:
             self.modified_content = re.sub(
@@ -293,15 +395,22 @@ class LatexFile:
                 self.modified_content,
             )
 
-    def adapt_for_thesis(self):
+    def extract_sections(self, unnumbered_sections: bool = True):
         """
-        Filters the lines in the document to only the ones with content.
+        Removes the lines that do not correspond to a section.
 
         Usefull to include article in a thesis. Removes the lines
         before the first section and those after the \end{document} line. Also
         removes the lines containting bibliography inputs (\\bibliography{...}
-        or \\bibliographystyle). It also ensures that the acknoledge and
-        conflict of interest are unnumbered sections.
+        or \\bibliographystyle). It also ensures that the acknowledge and
+        conflict of interest are unnumbered sections if unnumbered_sections is
+        True.
+        
+        Parameters
+        ----------
+        unnumbered_sections : bool, optional
+            If True, ensures that the Acknowledge and Conflict of Interest
+            sections are unnumbered. Defaults to True.
         """
         start = False
         final_lines = []
@@ -316,7 +425,7 @@ class LatexFile:
                     break
                 elif r"\bibliography" in line:
                     continue
-                elif re.match(
+                elif unnumbered_sections and re.match(
                     r"^\s*\\section\{(acknowledge|conflicts? of interest?).*",
                     line.lower(),
                 ):
@@ -328,7 +437,7 @@ class LatexFile:
         
     def lines_for_results(self):
         """
-        Returns the lines to add in the results.tex file.
+        Returns the lines to add in the results.tex file in the thesis.
         
         Check the chaptermark, it is the same as title.
         """
