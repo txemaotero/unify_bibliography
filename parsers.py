@@ -7,7 +7,7 @@ from typing import Any
 class BibFile:
     """
     Class to manage the bibliography entries in a .bib file
-    
+
     Parameters
     ----------
     fname : str
@@ -21,13 +21,14 @@ class BibFile:
         The lines that are not bib entries (usually header lines)
 
     """
+
     def __init__(self, fname: str = None):
         self.bib_entries: dict[str, BibEntry] = {}
         self.non_entry_lines: list[str] = []
         self.fname = fname
         if self.fname is not None:
             self.parse_bib()
-            
+
     def __getitem__(self, key: str) -> "BibEntry":
         return self.bib_entries[key]
 
@@ -104,7 +105,6 @@ class BibFile:
         key = key.strip().replace(",", "")
         self.bib_entries[key] = BibEntry(entry_type, key, fields)
 
-
     def find_duplicated_entries(self) -> list[str]:
         """
         Find duplicated entries in the bib file checking the title, doi and issbn.
@@ -166,10 +166,10 @@ class BibFile:
 class BibEntry:
     """
     Class to represent a bibtex entry.
-    
+
     Note: two BibEntry objects are equal if they have the same id_key, title,
     doi or issbn.
-    
+
     Parameters
     ----------
     type : str
@@ -179,7 +179,7 @@ class BibEntry:
     fields : str
         The text of the bib file with the information of the entry (authors,
         year, ...)
-    
+
     Attributes
     ----------
     type : str
@@ -188,8 +188,9 @@ class BibEntry:
         The bib key of the entry
     fields : dict[str, str]
         A dictionary with the fields of the entry.
-    
+
     """
+
     def __init__(self, type: str, id_key: str, fields: str = None):
         self.type = type
         self.id_key = id_key
@@ -236,7 +237,7 @@ class BibEntry:
 class LatexFile:
     """
     Class to modify a latex file.
-    
+
     Parameters
     ----------
     fname : str
@@ -262,8 +263,9 @@ class LatexFile:
         The packages included in the latex file. The keys are the package names
         and the values are the lines used to include the package (with the
         additional options).
-    
+
     """
+
     def __init__(self, fname: str):
         self.fname = fname
         self.file_dir = os.path.dirname(fname)
@@ -322,7 +324,9 @@ class LatexFile:
         Parses the included packages in the latex file.
         """
         packages = {}
-        for match in re.finditer(r"\\usepackage\s*\[[\S\s]*?\]\s*\{([\S\s]*?)\}", self.modified_content):
+        for match in re.finditer(
+            r"\\usepackage\s*\[[\S\s]*?\]\s*\{([\S\s]*?)\}", self.modified_content
+        ):
             packages[match.group(1)] = match.group(0)
         return packages
 
@@ -405,7 +409,7 @@ class LatexFile:
         or \\bibliographystyle). It also ensures that the acknowledge and
         conflict of interest are unnumbered sections if unnumbered_sections is
         True.
-        
+
         Parameters
         ----------
         unnumbered_sections : bool, optional
@@ -414,9 +418,12 @@ class LatexFile:
         """
         start = False
         final_lines = []
+        sec_re = re.compile(r"\\section\*?\{([\s\S]*?)\}")
         for line in self.modified_content.splitlines():
-            if not start and r"\section{" in line:
-                final_lines.append(line)
+            if not start and (match := sec_re.match(line)):
+                if not match.group(1).strip():
+                    continue
+                final_lines.append(r"\section{" + match.group(1) + "}")
                 start = True
             elif not start:
                 continue
@@ -425,20 +432,24 @@ class LatexFile:
                     break
                 elif r"\bibliography" in line:
                     continue
-                elif unnumbered_sections and re.match(
-                    r"^\s*\\section\{(acknowledge|conflicts? of interest?).*",
-                    line.lower(),
-                ):
-                    final_lines.append(re.sub(r"\\section\*?", r"\\section*", line))
+                elif match := sec_re.match(line):
+                    section = match.group(1).strip().lower()
+                    if unnumbered_sections and re.match(
+                        r"(acknowledg|conflicts? of interest?).*",
+                        section,
+                    ):
+                        final_lines.append(r"\section*{" + match.group(1) + "}")
+                    else:
+                        final_lines.append(r"\section{" + match.group(1) + "}")
                 else:
                     final_lines.append(line)
 
         self.modified_content = "\n".join(final_lines)
-        
+
     def lines_for_results(self):
         """
         Returns the lines to add in the results.tex file in the thesis.
-        
+
         Check the chaptermark, it is the same as title.
         """
         return f"""
