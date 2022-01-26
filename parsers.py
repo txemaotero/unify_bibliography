@@ -445,6 +445,17 @@ class LatexFile:
                     final_lines.append(line)
 
         self.modified_content = "\n".join(final_lines)
+        
+    def adapt_citations(self):
+        """
+        Changes cite formated like "...bla [1]. Bla..." to "...bla.[1] Bla...".
+        """
+        # TODO: check
+        self.modified_content = re.sub(
+            r"(?<![\.\,])[\ \r](\\cite\{[\S\s]*?\})([\.\,])\s*",
+            lambda m: m.group(2) + m.group(1) + ' ',
+            self.modified_content
+        )
 
     def lines_for_results(self):
         """
