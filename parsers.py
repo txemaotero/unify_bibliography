@@ -449,11 +449,17 @@ class LatexFile:
     def adapt_citations(self):
         """
         Changes cite formated like "...bla [1]. Bla..." to "...bla.[1] Bla...".
+        
+        Also ensures that the cites made after "Ref." are citenum.
         """
-        # TODO: check
         self.modified_content = re.sub(
-            r"(?<![\.\,])[\ \r](\\cite\{[\S\s]*?\})([\.\,])\s*",
-            lambda m: m.group(2) + m.group(1) + ' ',
+            r"(?<![\.\,])\ *([\ \n])(\\cite\{[^\}]*?\})([\.\,])\s*",
+            lambda m: m.group(3) + m.group(2) + m.group(1),
+            self.modified_content
+        )
+        self.modified_content = re.sub(
+            r"([Rr]efs?\.)([\ \n])\\cite\{([^\}]*?)\}",
+            lambda m: m.group(1) + m.group(2) + r'\citenum{' + m.group(3) + '}',
             self.modified_content
         )
 
