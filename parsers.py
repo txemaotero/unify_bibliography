@@ -383,7 +383,7 @@ class LatexFile:
         duplicates.
         """
         self.modified_content = re.sub(
-            r"\\(label.*?|ref.*?)\{(.*?)\}",
+            r"\\(label.*?|ref.*?|Cref.*?)\{(.*?)\}",
             self._label_ref_to_replace,
             self.modified_content,
         )
