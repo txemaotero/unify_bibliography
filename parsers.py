@@ -284,8 +284,10 @@ class LatexFile:
 
     def _input_to_replace(self, match: re.Match):
         f_input = match.group(1)
+        if len(os.path.basename(f_input).split('.')) == 1:
+            f_input += '.tex'
         if not os.path.exists(f_input):
-            f_input = os.path.join(self.file_dir, match.group(1))
+            f_input = os.path.join(self.file_dir, f_input)
             if not os.path.exists(f_input):
                 raise FileNotFoundError(
                     f"File {f_input} not found to replace the input."
