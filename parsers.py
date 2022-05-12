@@ -2,6 +2,20 @@ import difflib
 import os
 import re
 from typing import Any
+from tqdm import tqdm
+from functools import lru_cache
+
+from pylatexenc.latex2text import LatexNodes2Text
+
+
+ACCENT_CONVERTER = LatexNodes2Text()
+
+
+@lru_cache(maxsize=1024)
+def convert_to_lower_unicode(text: str) -> str:
+    """Converts text to lower unicode and removes brackets."""
+    unicode = ACCENT_CONVERTER.latex_to_text(text)
+    return re.sub("[\ \{\}]", "", unicode.lower())
 
 
 class BibFile:
@@ -111,7 +125,7 @@ class BibFile:
         """
         duplicated_entries = []
         unique_entries = []
-        for key, value in self.bib_entries.items():
+        for key, value in tqdm(self.bib_entries.items()):
             if value in unique_entries:
                 duplicated_entries.append(key)
             else:
@@ -204,6 +218,7 @@ class BibEntry:
     def __str__(self):
         final_str = f"@{self.type}{{{self.id_key},\n"
         for key, value in self.fields.items():
+            # Put doble braces to keep uppercase
             final_str += f"\t{key} = {{{value}}},\n"
         final_str = final_str[:-2] + "\n}"
         return final_str
@@ -213,15 +228,43 @@ class BibEntry:
         for field in ("title", "doi", "isbn"):
             if field in self.fields and field in other.fields:
                 if self.fields[field] and other.fields[field]:
-                    cond = cond or (self.fields[field] == other.fields[field])
+                    field_1 = self.fields[field].lower()
+                    field_2 = other.fields[field].lower()
+                    # If field title, convert to unicode and lowercase and remomve spaces
+                    if field == "title":
+                        field_1 = convert_to_lower_unicode(field_1)
+                        field_2 = convert_to_lower_unicode(field_2)
+
+                    cond = cond or (field_1 == field_2)
         return cond
 
     def parse_entry(self, fields: str):
         """
         Parse the text containing the fields of the entry.
         """
-        for entry_key, info in re.findall('\s*(\w+)\s*=\s*[\{"](.*)[\}"]', fields):
-            self.fields[entry_key.lower()] = info.strip()
+        key_split = re.split("\s*(\w+)\s*=\s*", fields)
+        entry_key = None
+        for element in key_split:
+            if not element.strip():
+                continue
+            if entry_key is None:
+                entry_key = element.lower()
+            else:
+                field = element.strip()
+                if field[-1] == ",":
+                    field = field[:-1]
+                field = re.sub("[\n\r\ ]+", " ", field)
+                if re.fullmatch("\{.*\}", field) or re.fullmatch('".*"', field):
+                    field = field[1:-1]
+                if entry_key == "author":
+                    # Separate Compound names and add dots JM -> J. M.
+                    field = re.sub(
+                        r"\s+([A-Z]+)(\s|$)",
+                        lambda m: " " + " ".join(i+'.' for i in m.group(1)) + m.group(2),
+                        field,
+                    )
+                self.fields[entry_key] = field
+                entry_key = None
 
     def merge(self, other: "BibEntry") -> "BibEntry":
         """
@@ -284,8 +327,8 @@ class LatexFile:
 
     def _input_to_replace(self, match: re.Match):
         f_input = match.group(1)
-        if len(os.path.basename(f_input).split('.')) == 1:
-            f_input += '.tex'
+        if len(os.path.basename(f_input).split(".")) == 1:
+            f_input += ".tex"
         if not os.path.exists(f_input):
             f_input = os.path.join(self.file_dir, f_input)
             if not os.path.exists(f_input):
@@ -346,7 +389,7 @@ class LatexFile:
     def replace_cite_entries(self, merged_dict: dict[str, str]):
         for old, new in merged_dict.items():
             self.modified_content = re.sub(
-                r"(\\(cite|citenum)\{[\S\s]*?)" + old,
+                r"(\\(cite|citenum|citeauthor)\{[\S\s]*?)" + old,
                 lambda m: m.group(1) + new,
                 self.modified_content,
             )
@@ -447,22 +490,22 @@ class LatexFile:
                     final_lines.append(line)
 
         self.modified_content = "\n".join(final_lines)
-        
+
     def adapt_citations(self):
         """
         Changes cite formated like "...bla [1]. Bla..." to "...bla.[1] Bla...".
-        
+
         Also ensures that the cites made after "Ref." are citenum.
         """
         self.modified_content = re.sub(
             r"(?<![\.\,])\ *([\ \n])(\\cite\{[^\}]*?\})([\.\,])\s*",
             lambda m: m.group(3) + m.group(2) + m.group(1),
-            self.modified_content
+            self.modified_content,
         )
         self.modified_content = re.sub(
             r"([Rr]efs?\.)([\ \n])\\cite\{([^\}]*?)\}",
-            lambda m: m.group(1) + m.group(2) + r'\citenum{' + m.group(3) + '}',
-            self.modified_content
+            lambda m: m.group(1) + m.group(2) + r"\citenum{" + m.group(3) + "}",
+            self.modified_content,
         )
 
     def lines_for_results(self):
