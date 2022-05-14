@@ -1,3 +1,4 @@
+from collections import deque
 import difflib
 import os
 import re
@@ -119,18 +120,23 @@ class BibFile:
         key = key.strip().replace(",", "")
         self.bib_entries[key] = BibEntry(entry_type, key, fields)
 
-    def find_duplicated_entries(self) -> list[str]:
+    def find_duplicated_entries(self) -> list[list[str]]:
         """
         Find duplicated entries in the bib file checking the title, doi and issbn.
         """
-        duplicated_entries = []
-        unique_entries = []
-        for key, value in tqdm(self.bib_entries.items()):
-            if value in unique_entries:
-                duplicated_entries.append(key)
-            else:
-                unique_entries.append(value)
-        return duplicated_entries
+        duplicated = []
+        keys, values = list(self.bib_entries.keys()), list(self.bib_entries.values())
+        remaining = deque(list(range(len(keys))))
+        while remaining:
+            index = remaining.popleft()
+            aux = [index]
+            for i in list(remaining):
+                if values[index] == values[i]:
+                    aux.append(i)
+                    remaining.remove(i)
+            if len(aux) > 1:
+                duplicated.append(aux)
+        return [[keys[i] for i in aux] for aux in duplicated]
 
     def merge_duplicated_entries(self):
         """
@@ -145,19 +151,15 @@ class BibFile:
         """
         duplicated_entries = self.find_duplicated_entries()
         merged_keys = {}
-        for key1 in duplicated_entries:
-            entry1 = self.bib_entries[key1]
-            key2, entry2 = self.get_key_entry(entry1, key1)
-            new_entry = entry1.merge(entry2)
-            if key1 != new_entry.id_key:
-                merged_keys[key1] = new_entry.id_key
-            if key2 != new_entry.id_key:
-                merged_keys[key2] = new_entry.id_key
-
-            _ = self.bib_entries.pop(key1)
-            _ = self.bib_entries.pop(key2)
+        for group in duplicated_entries:
+            new_entry = self.bib_entries[group[0]]
+            for key in group[1:]:
+                new_entry = new_entry.merge(self.bib_entries[key])
+            for key in group:
+                merged_keys[key] = new_entry.id_key
+                _ = self.bib_entries.pop(key)
             self.bib_entries[new_entry.id_key] = new_entry
-        return dict(merged_keys)
+        return merged_keys
 
     def get_key_entry(self, entry: "BibEntry", key: str) -> tuple[str, "BibEntry"]:
         """
