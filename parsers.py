@@ -500,8 +500,8 @@ class LatexFile:
         Also ensures that the cites made after "Ref." are citenum.
         """
         self.modified_content = re.sub(
-            r"(?<![\.\,])\ *([\ \n])(\\cite\{[^\}]*?\})([\.\,])\s*",
-            lambda m: m.group(3) + m.group(2) + m.group(1),
+            r"(?<![\.\,])\ *([\ \n])(\\cite\{[^\}]*?\})([\.\,])(\s*)",
+            lambda m: m.group(3) + m.group(2) + m.group(1) + m.group(4),
             self.modified_content,
         )
         self.modified_content = re.sub(
