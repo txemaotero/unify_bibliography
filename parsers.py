@@ -19,6 +19,14 @@ def convert_to_lower_unicode(text: str) -> str:
     return re.sub("[\ \{\}]", "", unicode.lower())
 
 
+def simplify_field(text: str) -> str:
+    text = ACCENT_CONVERTER.latex_to_text(text)
+    # remove brackets and dots and lowercase
+    text = re.sub("[\{\}\.]", "", text.lower())
+    # replace double dash with single dash
+    return text.replace("--", "-")
+
+
 class BibFile:
     """
     Class to manage the bibliography entries in a .bib file
@@ -262,7 +270,9 @@ class BibEntry:
                     # Separate Compound names and add dots JM -> J. M.
                     field = re.sub(
                         r"\s+([A-Z]+)(\s|$)",
-                        lambda m: " " + " ".join(i+'.' for i in m.group(1)) + m.group(2),
+                        lambda m: " "
+                        + " ".join(i + "." for i in m.group(1))
+                        + m.group(2),
                         field,
                     )
                 self.fields[entry_key] = field
@@ -277,6 +287,47 @@ class BibEntry:
         new_entry = BibEntry(self.type, id_key)
         new_entry.fields = {**other.fields, **self.fields}
         return new_entry
+
+    def is_similar(self, other: "BibEntry", n_similarities: int=3) -> bool:
+        """
+        Check if other bib entry is similar.
+
+        First, checks if they are equal. If not, it checks if the auhors are
+        the same and other fields that are in both entries. If the number of
+        similar fields is greater than n_similarities, the entries are
+        considered similar.
+        """
+        if self == other:
+            return True
+        common_not_empty_fields = []
+        for field in set(self.fields.keys()) & set(other.fields.keys()):
+            if self.fields[field].strip() and other.fields[field].strip():
+                common_not_empty_fields.append(field)
+        similarities = 0
+        for field in common_not_empty_fields:
+            # Special quick checks that restrict the number of comparisons
+            if field in ("volume", "number", "year"):
+                if self.fields[field].strip() == other.fields[field].strip():
+                    similarities += 1
+                    continue
+                return False
+            # Authors are tricky H. William can be the same as Humayun William
+            # We only check the last name
+            field1 = simplify_field(self.fields[field])
+            field2 = simplify_field(other.fields[field])
+            if field1 == field2:
+                similarities += 1
+            elif field == "author":
+                authors1 = field1.split(" and ")
+                authors2 = field2.split(" and ")
+                if len(authors1) != len(authors2):
+                    return False
+                similarities += all(
+                    aut1.split()[0] == aut2.split()[0]
+                    for aut1, aut2 in zip(authors1, authors2)
+                )
+
+        return similarities >= n_similarities
 
 
 class LatexFile:
@@ -524,3 +575,33 @@ class LatexFile:
 \includearticle{{mainmatter/article_pdf/{self.file_label}.pdf}}
 \input{{mainmatter/article_source/{self.file_label}/manuscript_mod.tex}}
 """
+
+
+if __name__ == "__main__":
+    """
+    Very useful code to find possible duplicate entries that are not so obvious
+    
+    Call the scrpt like this:
+
+        python3 parsers.py bibliography.bib similar_entries.txt
+    """
+    import sys
+
+    bfil = BibFile(sys.argv[1])
+    fout = sys.argv[2] if len(sys.argv) > 2 else 'similar_bib_entries.txt'
+
+    entries = list(bfil.bib_entries.values())
+
+    with open(fout, 'w') as f:
+        progress = tqdm(total=len(entries)*(len(entries)-1)/2)
+        for i, ent in tqdm(enumerate(entries)):
+            first = True
+            for j in range(i+1, len(entries)):
+                progress.update()
+                if ent.is_similar(entries[j]):
+                    if first:
+                        f.write("# This entry:\n")
+                        f.write(str(ent) + '\n')
+                        f.write("# Is similar to:\n\n")
+                        first = False
+                    f.write(str(entries[j]) + '\n\n')
